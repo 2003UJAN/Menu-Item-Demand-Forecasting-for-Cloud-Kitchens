@@ -9,71 +9,68 @@ import matplotlib.pyplot as plt
 st.set_page_config(page_title="Cloud Kitchen Demand Forecasting", layout="wide")
 
 st.title("🍽️ Cloud Kitchen Demand Forecasting (ML App)")
-st.write("Upload your dataset and forecast demand for any menu item across cities/kitchens.")
+st.write("Upload your dataset and forecast future demand based on city, kitchen, and item.")
 
-# ======================================
-# 1. FILE UPLOAD
-# ======================================
-uploaded_file = st.file_uploader("Upload your CSV", type=["csv"])
+# -----------------------------------------------------------
+# 1. FILE UPLOAD & VALIDATION
+# -----------------------------------------------------------
+uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
 else:
-    st.warning("Please upload your dataset to continue.")
+    st.warning("Please upload a dataset to continue.")
     st.stop()
 
-# ======================================
-# 2. VALIDATE DATASET STRUCTURE
-# ======================================
 required_cols = [
     "date","city","kitchen_id","item_name","category",
     "price","orders","weekday","promo_flag","temperature"
 ]
 
-missing = [c for c in required_cols if c not in df.columns]
-
-if missing:
-    st.error(f"❌ Missing columns: {missing}")
+missing_cols = [c for c in required_cols if c not in df.columns]
+if missing_cols:
+    st.error(f"❌ Missing required columns: {missing_cols}")
     st.stop()
 
-# Convert date column
 df["date"] = pd.to_datetime(df["date"])
 
-# ======================================
-# 3. FILTERS
-# ======================================
-st.subheader("🔎 Apply Filters")
+# -----------------------------------------------------------
+# 2. FILTERS (CITY → KITCHEN → ITEM)
+# -----------------------------------------------------------
+st.subheader("🔎 Select Filters")
 
-city = st.selectbox("Select City", df["city"].unique())
-kitchen = st.selectbox("Select Kitchen", df["kitchen_id"].unique())
-item = st.selectbox("Select Menu Item", df["item_name"].unique())
+city = st.selectbox("Select City", sorted(df["city"].unique()))
+kitchen = st.selectbox("Select Kitchen", sorted(df["kitchen_id"].unique()))
+item = st.selectbox("Select Menu Item", sorted(df["item_name"].unique()))
 
-filtered_df = df[
+filtered = df[
     (df["city"] == city) &
     (df["kitchen_id"] == kitchen) &
     (df["item_name"] == item)
 ].copy()
 
-if filtered_df.empty:
-    st.error("No records found for this combination. Try different filters.")
+if filtered.empty:
+    st.error("No matching records found. Try different filters.")
     st.stop()
 
 st.write("### 📌 Filtered Dataset Preview")
-st.dataframe(filtered_df.head())
+st.dataframe(filtered.head())
 
-# ======================================
-# 4. FEATURE ENGINEERING
-# ======================================
-filtered_df["day_index"] = np.arange(len(filtered_df))
+# -----------------------------------------------------------
+# 3. FEATURE ENGINEERING
+# -----------------------------------------------------------
+filtered = filtered.sort_values("date")
+filtered["day_index"] = np.arange(len(filtered))
 
+# Features used for ML model
 feature_cols = ["price", "promo_flag", "temperature", "day_index"]
 
-X = filtered_df[feature_cols]
-y = filtered_df["orders"]
+X = filtered[feature_cols]
+y = filtered["orders"]
 
-# ======================================
-# 5. TRAIN ML MODEL
-# ======================================
+# -----------------------------------------------------------
+# 4. TRAIN ML MODEL
+# -----------------------------------------------------------
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, shuffle=False
 )
@@ -90,32 +87,36 @@ st.subheader("📊 Model Performance")
 st.write(f"**MAE:** {mae:.2f}")
 st.write(f"**RMSE:** {rmse:.2f}")
 
-# ======================================
-# 6. FORECAST FUTURE DEMAND
-# ======================================
+# -----------------------------------------------------------
+# 5. FORECAST FUTURE DEMAND
+# -----------------------------------------------------------
 st.header("📈 Forecast Future Demand")
 
-future_days = st.slider("How many days to forecast?", 7, 120, 30)
+future_days = st.slider("Days to forecast:", 7, 120, 30)
 
-last_index = filtered_df["day_index"].iloc[-1]
+last_index = filtered["day_index"].iloc[-1]
 future_index = np.arange(last_index + 1, last_index + future_days + 1)
 
-# Use last known values
-last_price = filtered_df["price"].iloc[-1]
-last_promo = filtered_df["promo_flag"].iloc[-1]
-last_temp = filtered_df["temperature"].iloc[-1]
+# Use last known values (stable prediction)
+last_price = filtered["price"].iloc[-1]
+last_promo = filtered["promo_flag"].iloc[-1]
+last_temp = filtered["temperature"].iloc[-1]
 
+# ----- FIXED VERSION -----
 future_data = pd.DataFrame({
-    "day_index": future_index,
     "price": last_price,
     "promo_flag": last_promo,
     "temperature": last_temp,
+    "day_index": future_index,
 })
+
+# Ensure correct column order
+future_data = future_data[feature_cols]
 
 forecast = model.predict(future_data)
 
 forecast_df = pd.DataFrame({
-    "date": pd.date_range(filtered_df["date"].iloc[-1], periods=future_days+1, closed="right"),
+    "date": pd.date_range(filtered["date"].iloc[-1], periods=future_days+1, closed="right"),
     "forecast_orders": forecast
 })
 
